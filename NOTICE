@@ -1,0 +1,6 @@
+GrabiloBot
+Copyright 2026 GrabiloBot Contributors
+
+This product includes software developed for downloading and processing online media.
+Primary Extraction Engine: yt-dlp (https://github.com/yt-dlp/yt-dlp)
+Telegram Bot Framework: python-telegram-bot (https://github.com/python-telegram-bot/python-telegram-bot)

@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  grabilobot:
+    build: .
+    container_name: grabilobot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - grabilo_cache:/app/cache
+      - grabilo_temp:/app/temp
+
+volumes:
+  grabilo_cache:
+  grabilo_temp:
