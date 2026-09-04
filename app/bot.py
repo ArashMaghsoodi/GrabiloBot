@@ -58,7 +58,11 @@ def main():
     cache.cleanup_expired()
 
     # Build Telegram Bot Application
-    application = Application.builder().token(config.bot_token).build()
+    builder = Application.builder().token(config.bot_token)
+    if config.telegram_api_url:
+        builder = builder.base_url(f"{config.telegram_api_url}/bot").base_file_url(f"{config.telegram_api_url}/file/bot")
+        logger.info(f"Using custom local Telegram Bot API server: {config.telegram_api_url}")
+    application = builder.build()
 
     # Command Handlers
     application.add_handler(CommandHandler("start", start_command))

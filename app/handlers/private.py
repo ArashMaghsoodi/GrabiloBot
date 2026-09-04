@@ -1,3 +1,5 @@
+import time
+import asyncio
 import logging
 import uuid
 import html
@@ -83,17 +85,14 @@ async def handle_private_url(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await status_msg.edit_text("❌ No downloadable media found.")
             return
 
-        # Check duration limit
         if item.duration and item.duration > config.max_duration:
             await status_msg.edit_text(
                 f"❌ Media duration ({format_duration(item.duration)}) exceeds maximum limit of {format_duration(config.max_duration)}."
             )
             return
 
-        # Store media_info in context for callback references
         context.user_data[f"media:{item.platform.value}:{item.media_id}"] = media_info
 
-        # Build info message
         desc_lines = [
             f"🎬 <b>{html.escape(item.title)}</b>\n",
             f"<b>Platform:</b> {item.platform.value.capitalize()}",
@@ -133,8 +132,6 @@ async def handle_private_callback(update: Update, context: ContextTypes.DEFAULT_
 
     media_info: MediaInfo = context.user_data.get(f"media:{platform_str}:{media_id}")
     if not media_info:
-        # Try getting from cache service
-        # If not present in memory, show expired
         await query.edit_message_text("⚠️ This session has expired. Please send the link again.")
         return
 
@@ -145,7 +142,6 @@ async def handle_private_callback(update: Update, context: ContextTypes.DEFAULT_
 
     selected_format: MediaFormat = item.formats[fmt_idx]
 
-    # File size validation
     if selected_format.filesize and selected_format.filesize > config.max_file_size:
         await query.edit_message_text(
             f"⚠️ The selected quality ({selected_format.quality_label} - {human_readable_size(selected_format.filesize)}) "
@@ -157,7 +153,6 @@ async def handle_private_callback(update: Update, context: ContextTypes.DEFAULT_
     sender = TelegramMediaSender(context.bot)
     cache_key = f"{platform_str}:{media_id}:{selected_format.quality_label}"
 
-    # Check Telegram file cache
     cached_file = cache_service.get_telegram_file(cache_key)
     if cached_file:
         await query.edit_message_text("⚡ Reusing cached Telegram media...")
@@ -173,14 +168,30 @@ async def handle_private_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.message.delete()
             return
 
-    # Download required
-    await query.edit_message_text(f"⏳ Downloading <b>{selected_format.quality_label}</b>...", parse_mode="HTML")
+    await query.edit_message_text(f"⏳ Downloading <b>{selected_format.quality_label}</b>: 0%", parse_mode="HTML")
+
+    loop = asyncio.get_running_loop()
+    last_update_time = [0.0]
+
+    def on_progress(percent: float, downloaded_bytes: int, total_bytes: int, speed: float, eta: int):
+        now = time.time()
+        # Rate limit Telegram UI message edits (once per ~1.5s to avoid flood control)
+        if now - last_update_time[0] >= 1.5 or percent >= 100.0:
+            last_update_time[0] = now
+            pct_str = f"{percent:.1f}%"
+            speed_str = human_readable_size(int(speed)) + "/s" if speed else ""
+            extra_info = f" ({speed_str})" if speed_str else ""
+            text = f"⏳ Downloading <b>{selected_format.quality_label}</b>: {pct_str}{extra_info}"
+            asyncio.run_coroutine_threadsafe(
+                query.edit_message_text(text, parse_mode="HTML"), loop
+            )
 
     output_prefix = f"grabilo_{uuid.uuid4().hex[:8]}"
     file_path = await download_queue.download_task(
         url=item.url,
         format_id=selected_format.format_id,
         output_prefix=output_prefix,
+        progress_callback=on_progress,
     )
 
     if not file_path or not file_path.exists():
@@ -188,7 +199,6 @@ async def handle_private_callback(update: Update, context: ContextTypes.DEFAULT_
         return
 
     try:
-        # Check actual file size on disk
         actual_size = file_path.stat().st_size
         if actual_size > config.max_file_size:
             await query.edit_message_text(
@@ -211,7 +221,6 @@ async def handle_private_callback(update: Update, context: ContextTypes.DEFAULT_
         )
 
         if sent_msg:
-            # Cache file_id
             telegram_file_id = None
             file_type = "audio" if selected_format.is_audio_only else "video"
             if sent_msg.video:
@@ -234,7 +243,6 @@ async def handle_private_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.edit_message_text("❌ Failed to send file to Telegram.")
 
     finally:
-        # Guaranteed cleanup of downloaded file
         if file_path and file_path.exists():
             try:
                 file_path.unlink()

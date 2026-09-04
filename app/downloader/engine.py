@@ -128,6 +128,18 @@ class MediaDownloaderEngine:
         loop = asyncio.get_running_loop()
         out_template = str(self.temp_dir / f"{output_prefix}_%(id)s.%(ext)s")
 
+        def _ydl_hook(d: Dict[str, Any]):
+            if progress_callback and d.get("status") == "downloading":
+                total_bytes = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+                downloaded_bytes = d.get("downloaded_bytes") or 0
+                speed = d.get("speed")
+                eta = d.get("eta")
+                percent = (downloaded_bytes / total_bytes * 100) if total_bytes > 0 else 0.0
+                try:
+                    progress_callback(percent, downloaded_bytes, total_bytes, speed, eta)
+                except Exception:
+                    pass
+
         opts = {
             "quiet": True,
             "no_warnings": True,
@@ -136,6 +148,7 @@ class MediaDownloaderEngine:
             "merge_output_format": "mp4",
             "overwrites": True,
             "socket_timeout": 30,
+            "progress_hooks": [_ydl_hook],
         }
 
         def _download():
