@@ -5,6 +5,10 @@ from typing import List
 from telegram import (
     Update,
     InlineQueryResultArticle,
+    InlineQueryResultVideo,
+    InlineQueryResultAudio,
+    InlineQueryResultCachedVideo,
+    InlineQueryResultCachedAudio,
     InputTextMessageContent,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -36,7 +40,6 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     try:
-        # Fast metadata extraction
         media_info = await media_service.get_media_info(resolved_url)
         if not media_info or not media_info.items:
             return
@@ -49,43 +52,65 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         duration_str = format_duration(item.duration) if item.duration else "Media"
         platform_name = item.platform.value.capitalize()
 
-        for idx, fmt in enumerate(item.formats[:10]):  # Limit top 10 qualities
+        for idx, fmt in enumerate(item.formats[:10]):
             size_str = human_readable_size(fmt.filesize) if fmt.filesize else "Unknown size"
-            
-            title = f"🎥 {item.title}" if fmt.has_video else f"🎵 {item.title}"
-            description = f"{platform_name} • {duration_str} • {fmt.quality_label} ({size_str})"
-
-            # Short-lived token storing query parameters in context or message content
-            cb_data = f"inlinedl:{item.platform.value}:{item.media_id}:{idx}"
-
-            # Message sent when user taps inline result
-            msg_content = (
-                f"🎬 <b>{html.escape(item.title)}</b>\n"
-                f"<b>Platform:</b> {platform_name} | <b>Quality:</b> {fmt.quality_label}\n"
-                f"<b>Size:</b> {size_str}\n\n"
-                "⏳ <i>Preparing media download...</i>"
-            )
-
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬇️ Download Media", callback_data=cb_data)]
-            ])
+            cache_key = f"{item.platform.value}:{item.media_id}:{fmt.quality_label}"
+            cached_file = cache_service.get_telegram_file(cache_key)
 
             result_id = f"inline_{item.media_id}_{idx}"
-            results.append(
-                InlineQueryResultArticle(
-                    id=result_id,
-                    title=f"{fmt.quality_label} • {size_str}",
-                    description=f"{item.title} ({platform_name})",
-                    thumbnail_url=item.thumbnail if item.thumbnail else None,
-                    input_message_content=InputTextMessageContent(
-                        message_text=msg_content,
-                        parse_mode="HTML",
-                    ),
-                    reply_markup=keyboard,
-                )
-            )
+            caption = build_media_caption(item, fmt)
 
-        # Cache inline results for 5 minutes
+            if cached_file:
+                # Fast path: cached file_id instantly sends video/audio directly into the target chat
+                file_id = cached_file["file_id"]
+                file_type = cached_file["file_type"]
+
+                if file_type == "audio":
+                    results.append(
+                        InlineQueryResultCachedAudio(
+                            id=result_id,
+                            audio_file_id=file_id,
+                            caption=caption,
+                            parse_mode="HTML",
+                        )
+                    )
+                else:
+                    results.append(
+                        InlineQueryResultCachedVideo(
+                            id=result_id,
+                            video_file_id=file_id,
+                            title=f"{fmt.quality_label} • {size_str}",
+                            description=f"{item.title} ({platform_name})",
+                            caption=caption,
+                            parse_mode="HTML",
+                        )
+                    )
+            else:
+                # Uncached path: Send direct text message with status and callback token to trigger background download & send in same chat
+                cb_data = f"inlinedl:{item.platform.value}:{item.media_id}:{idx}"
+                msg_content = (
+                    f"🎬 <b>{html.escape(item.title)}</b>\n"
+                    f"<b>Platform:</b> {platform_name} | <b>Quality:</b> {fmt.quality_label} ({size_str})\n\n"
+                    "⏳ <i>Downloading media for chat delivery...</i>"
+                )
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⚡ Processing Download...", callback_data=cb_data)]
+                ])
+
+                results.append(
+                    InlineQueryResultArticle(
+                        id=result_id,
+                        title=f"{fmt.quality_label} • {size_str}",
+                        description=f"{item.title} ({platform_name})",
+                        thumbnail_url=item.thumbnail if item.thumbnail else None,
+                        input_message_content=InputTextMessageContent(
+                            message_text=msg_content,
+                            parse_mode="HTML",
+                        ),
+                        reply_markup=keyboard,
+                    )
+                )
+
         await query.answer(results, cache_time=300, is_personal=False)
 
     except Exception as e:
@@ -101,7 +126,6 @@ async def inline_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     if not data.startswith("inlinedl:"):
         return
 
-    await query.answer("Starting media download...")
     parts = data.split(":")
     if len(parts) != 4:
         return
@@ -109,24 +133,9 @@ async def inline_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     _, platform_str, media_id, fmt_idx_str = parts
     fmt_idx = int(fmt_idx_str)
 
-    # Re-identify platform and fetch metadata via cache
-    # In inline mode we reconstruct or fetch cached info
-    # Search cache for url by resolving platform + media_id
-    # We can fetch media_info directly if url was cached
-    # For inline, we store platform/media_id -> url mapping or fetch via media_service
-    # To keep it completely reliable, media_service get_media_info uses cache first
-    # So if user pasted URL, it's already in metadata_cache.
-    
-    # We can edit the inline message to show download progress
-    await query.edit_message_text("⏳ <b>Fetching media details...</b>", parse_mode="HTML")
-
-    # Retrieve media_info from cache
-    # We reconstruct the probable URL or search cache
-    # In our media_service, we can store a key mapping media_id -> media_info
     cached_info = cache_service.get_media_info(f"{platform_str}:{media_id}")
     if not cached_info:
-        # Fallback: try search or prompt resend
-        await query.edit_message_text("❌ Media session expired. Please re-type the link.")
+        await query.answer("❌ Media session expired.", show_alert=True)
         return
 
     from app.services.media_service import media_service
@@ -134,33 +143,14 @@ async def inline_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     item = media_info.primary_item
 
     if not item or fmt_idx >= len(item.formats):
-        await query.edit_message_text("❌ Selected quality format not found.")
+        await query.answer("❌ Selected quality format not found.", show_alert=True)
         return
 
     selected_format = item.formats[fmt_idx]
     sender = TelegramMediaSender(context.bot)
     cache_key = f"{platform_str}:{media_id}:{selected_format.quality_label}"
 
-    # Check Telegram file cache
-    cached_file = cache_service.get_telegram_file(cache_key)
-    if cached_file:
-        await query.edit_message_text("⚡ Delivering cached media...")
-        caption = build_media_caption(item, selected_format)
-        # For inline callback, sending file as message in chat
-        chat_id = query.message.chat_id if query.message else query.from_user.id
-        sent = await sender.send_file_id(
-            chat_id=chat_id,
-            file_id=cached_file["file_id"],
-            file_type=cached_file["file_type"],
-            caption=caption,
-        )
-        if sent and query.message:
-            await query.message.delete()
-        return
-
-    await query.edit_message_text(
-        f"⏳ <b>Downloading {selected_format.quality_label}...</b>", parse_mode="HTML"
-    )
+    await query.answer(f"Downloading {selected_format.quality_label}...")
 
     output_prefix = f"grabilo_inline_{uuid.uuid4().hex[:8]}"
     file_path = await download_queue.download_task(
@@ -181,15 +171,24 @@ async def inline_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             )
             return
 
-        await query.edit_message_text("📤 <b>Sending media...</b>", parse_mode="HTML")
         caption = build_media_caption(item, selected_format)
-        chat_id = query.message.chat_id if query.message else query.from_user.id
 
+        # Target chat identification: inline_message_id if present, else chat_id
+        target_kwargs = {}
+        if query.inline_message_id:
+            target_kwargs["inline_message_id"] = query.inline_message_id
+        elif query.message:
+            target_kwargs["chat_id"] = query.message.chat_id
+
+        # Since inline messages edited via inline_message_id cannot directly attach new local file binaries via editMessageMedia without existing file_id,
+        # we upload media to user context or chat and update/send.
+        chat_id = query.message.chat_id if query.message else query.from_user.id
         sent_msg = await sender.send_local_file(
             chat_id=chat_id,
             file_path=file_path,
             is_audio=selected_format.is_audio_only,
             caption=caption,
+            parse_mode="HTML",
             duration=item.duration,
             title=item.title,
             performer=item.author,
@@ -213,8 +212,18 @@ async def inline_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                     caption=caption,
                 )
 
+            # Delete the placeholder inline message if in standard chat
             if query.message:
                 await query.message.delete()
+            elif query.inline_message_id:
+                try:
+                    await context.bot.edit_message_text(
+                        inline_message_id=query.inline_message_id,
+                        text="✅ <i>Media delivered below!</i>",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
         else:
             await query.edit_message_text("❌ Failed to deliver media.")
 

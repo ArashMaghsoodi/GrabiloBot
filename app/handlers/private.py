@@ -167,6 +167,7 @@ async def handle_private_callback(update: Update, context: ContextTypes.DEFAULT_
             file_id=cached_file["file_id"],
             file_type=cached_file["file_type"],
             caption=caption,
+            parse_mode="HTML",
         )
         if sent:
             await query.message.delete()
@@ -203,6 +204,7 @@ async def handle_private_callback(update: Update, context: ContextTypes.DEFAULT_
             file_path=file_path,
             is_audio=selected_format.is_audio_only,
             caption=caption,
+            parse_mode="HTML",
             duration=item.duration,
             title=item.title,
             performer=item.author,

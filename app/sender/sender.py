@@ -17,15 +17,16 @@ class TelegramMediaSender:
         file_id: str,
         file_type: str,
         caption: Optional[str] = None,
+        parse_mode: Optional[str] = None,
     ) -> Optional[Message]:
         try:
             if file_type == "audio":
                 return await self.bot.send_audio(
-                    chat_id=chat_id, audio=file_id, caption=caption
+                    chat_id=chat_id, audio=file_id, caption=caption, parse_mode=parse_mode
                 )
             else:
                 return await self.bot.send_video(
-                    chat_id=chat_id, video=file_id, caption=caption
+                    chat_id=chat_id, video=file_id, caption=caption, parse_mode=parse_mode
                 )
         except TelegramError as e:
             logger.error(f"Error sending cached file_id {file_id}: {e}")
@@ -37,6 +38,7 @@ class TelegramMediaSender:
         file_path: Path,
         is_audio: bool = False,
         caption: Optional[str] = None,
+        parse_mode: Optional[str] = None,
         duration: Optional[int] = None,
         title: Optional[str] = None,
         performer: Optional[str] = None,
@@ -52,6 +54,7 @@ class TelegramMediaSender:
                         chat_id=chat_id,
                         audio=InputFile(f, filename=file_path.name),
                         caption=caption,
+                        parse_mode=parse_mode,
                         duration=duration,
                         title=title,
                         performer=performer,
@@ -61,6 +64,7 @@ class TelegramMediaSender:
                         chat_id=chat_id,
                         video=InputFile(f, filename=file_path.name),
                         caption=caption,
+                        parse_mode=parse_mode,
                         duration=duration,
                         supports_streaming=True,
                     )
