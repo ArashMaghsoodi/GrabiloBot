@@ -9,6 +9,8 @@ load_dotenv()
 @dataclass
 class Config:
     bot_token: str = field(default_factory=lambda: os.getenv("BOT_TOKEN", ""))
+    telegram_api_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_API_ID", ""))
+    telegram_api_hash: str = field(default_factory=lambda: os.getenv("TELEGRAM_API_HASH", ""))
     telegram_api_url: str = field(
         default_factory=lambda: os.getenv("TELEGRAM_API_URL", "").rstrip("/")
     )
@@ -16,7 +18,12 @@ class Config:
         default_factory=lambda: int(os.getenv("MAX_CONCURRENT_DOWNLOADS", "2"))
     )
     max_file_size: int = field(
-        default_factory=lambda: int(os.getenv("MAX_FILE_SIZE", str(2000 * 1024 * 1024 if os.getenv("TELEGRAM_API_URL") else 50 * 1024 * 1024)))
+        default_factory=lambda: int(
+            os.getenv(
+                "MAX_FILE_SIZE",
+                str(2000 * 1024 * 1024 if (os.getenv("TELEGRAM_API_URL") or (os.getenv("TELEGRAM_API_ID") and os.getenv("TELEGRAM_API_HASH"))) else 50 * 1024 * 1024)
+            )
+        )
     )
     max_duration: int = field(
         default_factory=lambda: int(os.getenv("MAX_DURATION", "7200"))

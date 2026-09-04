@@ -1,16 +1,35 @@
 version: '3.8'
 
 services:
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: telegram-bot-api
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
+    command: ["--local", "--http-port", "8081"]
+    volumes:
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
+
   grabilobot:
     build: .
     container_name: grabilobot
     restart: unless-stopped
+    depends_on:
+      - telegram-bot-api
     env_file:
       - .env
+    environment:
+      - TELEGRAM_API_URL=http://telegram-bot-api:8081
     volumes:
       - grabilo_cache:/app/cache
       - grabilo_temp:/app/temp
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
 
 volumes:
   grabilo_cache:
   grabilo_temp:
+  telegram_bot_api_data:
