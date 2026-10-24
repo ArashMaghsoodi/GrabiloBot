@@ -60,7 +60,14 @@ def main():
     # Build Telegram Bot Application
     builder = Application.builder().token(config.bot_token)
     if config.telegram_api_url:
-        builder = builder.base_url(f"{config.telegram_api_url}/bot").base_file_url(f"{config.telegram_api_url}/file/bot")
+        custom_url = config.telegram_api_url
+        # Ensure the custom URL has a protocol; default to http://
+        if not custom_url.startswith(("http://", "https://")):
+            custom_url = f"http://{custom_url}"
+        # python-telegram-bot expects base_url to end with "/bot"
+        if not custom_url.endswith("/bot"):
+            custom_url = f"{custom_url.rstrip('/')}/bot"
+        builder = builder.base_url(custom_url).base_file_url(custom_url.replace("/bot", "/file/bot"))
         logger.info(f"Using custom local Telegram Bot API server: {config.telegram_api_url}")
     application = builder.build()
 
