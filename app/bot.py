@@ -90,7 +90,10 @@ def main():
     application.add_error_handler(error_handler)
 
     logger.info("GrabiloBot is starting polling...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        bootstrap_retries=-1,
+    )
 
 
 if __name__ == "__main__":
